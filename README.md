@@ -6,8 +6,6 @@
 
 `richhistory` keeps shell history with output, cwd, exit status, and session context.
 
-10-second demo: [asciinema cast](./demo/quickstart.cast) | [plain text transcript](./demo/quickstart.txt)
-
 ```text
 $ richhistory show 20260415T090000Z-...
 id: 20260415T090000Z-...

@@ -20,6 +20,11 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install zsh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh
+
       - name: Verify formatting
         run: |
           diff="$(gofmt -d $(find . -name '*.go' -not -path './.git/*'))"
