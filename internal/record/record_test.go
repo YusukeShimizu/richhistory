@@ -109,6 +109,69 @@ func TestStartUsesMetadataModeForFullscreenCommands(t *testing.T) {
 	}
 }
 
+func TestStartUsesMetadataModeForBroadInteractiveCommands(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cfg := config.Default()
+
+	testCases := []struct {
+		name    string
+		command string
+	}{
+		{name: "codex default", command: "codex"},
+		{name: "claude default", command: "/Users/test/.local/bin/claude chat"},
+		{name: "command wrapper", command: "command codex exec"},
+		{name: "env assignment", command: "FOO=1 codex exec"},
+		{name: "sudo wrapper", command: "sudo -u root codex exec"},
+		{name: "time wrapper", command: "time codex exec"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := record.Start(root, cfg, record.StartInput{
+				SessionID: "session-1",
+				Seq:       1,
+				Shell:     "zsh",
+				Command:   tc.command,
+				PWD:       "/tmp",
+				StartedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatalf("Start returned error: %v", err)
+			}
+			if result.CaptureMode != "metadata" {
+				t.Fatalf("expected metadata for %q, got %q", tc.command, result.CaptureMode)
+			}
+		})
+	}
+}
+
+func TestStartForceFullOverridesMetadataDefaults(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.ForceFullPatterns = []string{`^codex exec --json$`}
+
+	result, err := record.Start(root, cfg, record.StartInput{
+		SessionID: "session-1",
+		Seq:       1,
+		Shell:     "zsh",
+		Command:   "codex exec --json",
+		PWD:       "/tmp",
+		StartedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if result.CaptureMode != "full" {
+		t.Fatalf("expected full capture mode, got %q", result.CaptureMode)
+	}
+}
+
 func TestStartSkipsSelfCommands(t *testing.T) {
 	t.Parallel()
 
@@ -130,5 +193,98 @@ func TestStartSkipsSelfCommands(t *testing.T) {
 		if result.CaptureMode != "skip" {
 			t.Fatalf("expected skip for %q, got %q", command, result.CaptureMode)
 		}
+	}
+}
+
+func TestFinishAutoAddsTTYFailureCommands(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.AutoAddMetadata = true
+
+	startedAt := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	result, err := record.Start(root, cfg, record.StartInput{
+		SessionID: "session-1",
+		Seq:       1,
+		Shell:     "zsh",
+		Command:   "mycli chat",
+		PWD:       "/tmp",
+		StartedAt: startedAt,
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if result.CaptureMode != "full" {
+		t.Fatalf("expected full capture mode, got %q", result.CaptureMode)
+	}
+
+	writeErr := os.WriteFile(result.StderrFile, []byte("stdin is not a terminal"), 0o600)
+	if writeErr != nil {
+		t.Fatalf("WriteFile stderr returned error: %v", writeErr)
+	}
+
+	_, _, finishErr := record.Finish(root, cfg, record.FinishInput{
+		StateFile:  result.StateFile,
+		PWDAfter:   "/tmp",
+		ExitCode:   1,
+		FinishedAt: startedAt.Add(500 * time.Millisecond),
+	})
+	if finishErr != nil {
+		t.Fatalf("Finish returned error: %v", finishErr)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !loaded.HasMetadataCommandName("mycli") {
+		t.Fatalf("expected mycli to be auto-added, got %#v", loaded.MetadataCommandNames)
+	}
+}
+
+func TestFinishDoesNotAutoAddNormalFailures(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+
+	root := t.TempDir()
+	cfg := config.Default()
+	cfg.AutoAddMetadata = true
+
+	startedAt := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	result, err := record.Start(root, cfg, record.StartInput{
+		SessionID: "session-1",
+		Seq:       1,
+		Shell:     "zsh",
+		Command:   "mycli chat",
+		PWD:       "/tmp",
+		StartedAt: startedAt,
+	})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+
+	writeErr := os.WriteFile(result.StderrFile, []byte("permission denied"), 0o600)
+	if writeErr != nil {
+		t.Fatalf("WriteFile stderr returned error: %v", writeErr)
+	}
+
+	_, _, finishErr := record.Finish(root, cfg, record.FinishInput{
+		StateFile:  result.StateFile,
+		PWDAfter:   "/tmp",
+		ExitCode:   1,
+		FinishedAt: startedAt.Add(500 * time.Millisecond),
+	})
+	if finishErr != nil {
+		t.Fatalf("Finish returned error: %v", finishErr)
+	}
+
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if loaded.HasMetadataCommandName("mycli") {
+		t.Fatalf("did not expect mycli to be auto-added: %#v", loaded.MetadataCommandNames)
 	}
 }

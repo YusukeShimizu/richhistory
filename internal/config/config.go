@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/YusukeShimizu/richhistory/internal/paths"
 )
@@ -23,6 +25,9 @@ const (
 type Config struct {
 	IgnoreCommandPatterns []string `json:"ignore_command_patterns"`
 	IgnoreCWDPatterns     []string `json:"ignore_cwd_patterns"`
+	MetadataCommandNames  []string `json:"metadata_command_names"`
+	ForceFullPatterns     []string `json:"force_full_command_patterns"`
+	AutoAddMetadata       bool     `json:"auto_add_metadata_commands"`
 	MaxStdoutBytes        int      `json:"max_stdout_bytes"`
 	MaxStderrBytes        int      `json:"max_stderr_bytes"`
 	MaxCommandBytes       int      `json:"max_command_bytes"`
@@ -32,6 +37,8 @@ type Config struct {
 
 	commandPatterns []*regexp.Regexp
 	cwdPatterns     []*regexp.Regexp
+	forcePatterns   []*regexp.Regexp
+	metadataNames   map[string]struct{}
 }
 
 func Default() Config {
@@ -78,6 +85,52 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+func Save(cfg Config) error {
+	if err := cfg.Prepared(); err != nil {
+		return err
+	}
+
+	path, err := paths.ConfigPath()
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Dir(path)
+	mkdirErr := os.MkdirAll(dir, 0o750)
+	if mkdirErr != nil {
+		return fmt.Errorf("create config dir %s: %w", dir, mkdirErr)
+	}
+
+	encoded, marshalErr := json.MarshalIndent(cfg.serializable(), "", "  ")
+	if marshalErr != nil {
+		return fmt.Errorf("marshal config %s: %w", path, marshalErr)
+	}
+	encoded = append(encoded, '\n')
+
+	tmpPath := path + ".tmp"
+	writeErr := os.WriteFile(tmpPath, encoded, 0o600)
+	if writeErr != nil {
+		return fmt.Errorf("write config %s: %w", tmpPath, writeErr)
+	}
+
+	renameErr := os.Rename(tmpPath, path)
+	if renameErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("rename config %s: %w", path, renameErr)
+	}
+
+	return nil
+}
+
+func (cfg *Config) Prepared() error {
+	cfg.applyDefaults()
+	if err := cfg.compile(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func EnsureConfigDir() (string, error) {
 	path, err := paths.ConfigPath()
 	if err != nil {
@@ -113,6 +166,47 @@ func (cfg *Config) IgnoreCWD(cwd string) bool {
 	return false
 }
 
+func (cfg *Config) ForceFullCommand(command string) bool {
+	for _, pattern := range cfg.forcePatterns {
+		if pattern.MatchString(command) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (cfg *Config) HasMetadataCommandName(name string) bool {
+	_, ok := cfg.metadataNames[strings.TrimSpace(name)]
+	return ok
+}
+
+func (cfg *Config) AddMetadataCommandName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" || cfg.HasMetadataCommandName(trimmed) {
+		return false
+	}
+	if cfg.metadataNames == nil {
+		cfg.metadataNames = make(map[string]struct{})
+	}
+
+	cfg.MetadataCommandNames = append(cfg.MetadataCommandNames, trimmed)
+	cfg.metadataNames[trimmed] = struct{}{}
+	return true
+}
+
+func AppendMetadataCommandName(name string) error {
+	cfg, err := Load()
+	if err != nil {
+		return err
+	}
+	if !cfg.AddMetadataCommandName(name) {
+		return nil
+	}
+
+	return Save(cfg)
+}
+
 func (cfg *Config) applyDefaults() {
 	if cfg.MaxStdoutBytes <= 0 {
 		cfg.MaxStdoutBytes = DefaultMaxStdoutBytes
@@ -146,6 +240,20 @@ func (cfg *Config) compile() error {
 		return err
 	}
 
+	cfg.forcePatterns, err = compilePatterns(cfg.ForceFullPatterns, "force_full_command_patterns")
+	if err != nil {
+		return err
+	}
+
+	cfg.metadataNames = make(map[string]struct{}, len(cfg.MetadataCommandNames))
+	for _, name := range cfg.MetadataCommandNames {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		cfg.metadataNames[trimmed] = struct{}{}
+	}
+
 	return nil
 }
 
@@ -161,4 +269,32 @@ func compilePatterns(patterns []string, field string) ([]*regexp.Regexp, error) 
 	}
 
 	return compiled, nil
+}
+
+func (cfg *Config) serializable() Config {
+	value := *cfg
+	value.commandPatterns = nil
+	value.cwdPatterns = nil
+	value.forcePatterns = nil
+	value.metadataNames = nil
+
+	value.IgnoreCommandPatterns = slices.Clone(value.IgnoreCommandPatterns)
+	value.IgnoreCWDPatterns = slices.Clone(value.IgnoreCWDPatterns)
+	value.MetadataCommandNames = slices.Clone(value.MetadataCommandNames)
+	value.ForceFullPatterns = slices.Clone(value.ForceFullPatterns)
+
+	if value.IgnoreCommandPatterns == nil {
+		value.IgnoreCommandPatterns = []string{}
+	}
+	if value.IgnoreCWDPatterns == nil {
+		value.IgnoreCWDPatterns = []string{}
+	}
+	if value.MetadataCommandNames == nil {
+		value.MetadataCommandNames = []string{}
+	}
+	if value.ForceFullPatterns == nil {
+		value.ForceFullPatterns = []string{}
+	}
+
+	return value
 }

@@ -24,6 +24,7 @@ type event struct {
 	SessionID   string `json:"session_id"`
 	SessionName string `json:"session_name"`
 	Command     string `json:"command"`
+	CaptureMode string `json:"capture_mode"`
 	PWDBefore   string `json:"pwd_before"`
 	PWDAfter    string `json:"pwd_after"`
 	ExitCode    int    `json:"exit_code"`
@@ -67,6 +68,70 @@ func TestZshIntegrationCapturesCommands(t *testing.T) {
 	assertCommand(t, events, "cd /tmp", func(item event) {
 		if item.PWDAfter != "/tmp" {
 			t.Fatalf("cd pwd_after mismatch: %#v", item)
+		}
+	})
+}
+
+func TestZshIntegrationProtectsDefaultInteractiveCommands(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := filepath.Dir(mustGetwd(t))
+	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
+	stateRoot := t.TempDir()
+	configRoot := t.TempDir()
+	writeExecutable(t, filepath.Join(filepath.Dir(binPath), "codex"), interactiveProbeScript)
+
+	ptmx, cmd, buffer, readDone := startShell(t, binPath, "richhistory", stateRoot, configRoot)
+	defer ptmx.Close()
+
+	waitForPrompt(t, buffer)
+	start := buffer.Len()
+	runCommand(t, ptmx, buffer, "codex")
+	exitShell(t, ptmx, cmd, readDone)
+
+	segment := buffer.Since(start)
+	if !strings.Contains(segment, "tty-ok") {
+		t.Fatalf("expected interactive command to keep tty, got output: %s", segment)
+	}
+
+	events := readEvents(t, filepath.Join(stateRoot, "richhistory", "events"))
+	assertCommand(t, events, "codex", func(item event) {
+		if item.CaptureMode != "metadata" {
+			t.Fatalf("expected metadata capture mode: %#v", item)
+		}
+		if item.StdoutText != "" || item.StderrText != "" {
+			t.Fatalf("metadata command should not capture output: %#v", item)
+		}
+	})
+}
+
+func TestZshIntegrationForceFullOverrideCapturesTTYFailure(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := filepath.Dir(mustGetwd(t))
+	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
+	stateRoot := t.TempDir()
+	configRoot := t.TempDir()
+	writeExecutable(t, filepath.Join(filepath.Dir(binPath), "codex"), interactiveProbeScript)
+	writeConfig(t, configRoot, `{
+  "force_full_command_patterns": ["^codex$"]
+}`)
+
+	ptmx, cmd, buffer, readDone := startShell(t, binPath, "richhistory", stateRoot, configRoot)
+	defer ptmx.Close()
+
+	waitForPrompt(t, buffer)
+	runCommand(t, ptmx, buffer, "codex")
+	runCommand(t, ptmx, buffer, "true")
+	exitShell(t, ptmx, cmd, readDone)
+
+	events := readEvents(t, filepath.Join(stateRoot, "richhistory", "events"))
+	assertCommand(t, events, "codex", func(item event) {
+		if item.CaptureMode != "full" {
+			t.Fatalf("expected full capture mode: %#v", item)
+		}
+		if item.ExitCode == 0 || !strings.Contains(item.StderrText, "stdin is not a terminal") {
+			t.Fatalf("expected tty failure to be captured: %#v", item)
 		}
 	})
 }
@@ -261,6 +326,26 @@ func assertCommand(t *testing.T, events []event, command string, check func(even
 	t.Fatalf("command %q not found in events: %#v", command, events)
 }
 
+func writeExecutable(t *testing.T, path string, body string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatalf("WriteFile executable returned error: %v", err)
+	}
+}
+
+func writeConfig(t *testing.T, configRoot string, body string) {
+	t.Helper()
+
+	path := filepath.Join(configRoot, "richhistory", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("MkdirAll config dir returned error: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile config returned error: %v", err)
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 
@@ -309,3 +394,13 @@ func (buffer *syncBuffer) String() string {
 
 	return buffer.buf.String()
 }
+
+const interactiveProbeScript = `#!/bin/sh
+if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
+  echo "tty-ok"
+  exit 0
+fi
+
+echo "stdin is not a terminal" >&2
+exit 64
+`
