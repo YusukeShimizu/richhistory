@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify formatting
+        run: |
+          diff="$(gofmt -d $(find . -name '*.go' -not -path './.git/*'))"
+          test -z "$diff"
+
+      - name: Run lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.2 run ./...
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run shell tests
+        run: |
+          zsh contrib/autosuggest/test_autosuggest.zsh
+          zsh contrib/atc/test_atc.zsh
+
+      - name: Run race tests
+        run: go test -race ./...

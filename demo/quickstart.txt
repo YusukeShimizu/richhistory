@@ -1,0 +1,22 @@
+$ richhistory show -n 2
+20260415T090012.000000000Z-d1006f32  exit=1  session=demo-session  cwd=/workspace/richhistory
+  ls /definitely-missing
+20260415T090000.000000000Z-6f017f47  exit=0  session=demo-session  cwd=/workspace/richhistory
+  echo hello
+
+$ richhistory show 20260415T090000.000000000Z-6f017f47
+id: 20260415T090000.000000000Z-6f017f47
+session: demo-session
+session_name: demo
+command: echo hello
+exit_code: 0
+cwd_before: /workspace/richhistory
+cwd_after: /workspace/richhistory
+stdout:
+hello
+
+stderr:
+
+
+$ richhistory search hello --field stdout
+20260415T090000.000000000Z-6f017f47  echo hello
