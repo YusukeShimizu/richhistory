@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -154,7 +155,7 @@ func exitShell(t *testing.T, ptmx *os.File, cmd *exec.Cmd, readDone <-chan error
 	}
 
 	readErr := <-readDone
-	if readErr != nil && !errors.Is(readErr, io.EOF) {
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, syscall.EIO) {
 		t.Fatalf("reader goroutine returned error: %v", readErr)
 	}
 }
