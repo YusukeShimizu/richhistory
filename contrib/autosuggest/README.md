@@ -2,7 +2,7 @@
 
 This helper asks `codex exec` for a single likely next command and lets Codex inspect `richhistory` when recent shell context is not enough.
 
-It is useful when you want suggestions that can draw on earlier commands, failures, and output across shell sessions.
+It is useful when you want suggestions that can draw on earlier commands, failures, and output across shell sessions. With the current WezTerm pane capture path, `richhistory` output is primarily available through `stdout_text`, so the helper biases Codex toward `show --status fail` and `search --field stdout`.
 
 ## Requirements
 

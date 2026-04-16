@@ -81,7 +81,7 @@ If the most recent command was a question to an AI assistant such as @g, @goose,
 You may inspect recent shell history with ${history_cmd} if it helps disambiguate. Useful commands include:
 - ${history_cmd} show --cwd "$PWD" -n 20 --json
 - ${history_cmd} show --status fail -n 10 --json
-- ${history_cmd} search <query> --field stderr --n 20 --json
+- ${history_cmd} search <query> --field stdout --n 20 --json
 
 Current directory: ${PWD:A}
 Repository root: ${repo_root:-"(none)"}

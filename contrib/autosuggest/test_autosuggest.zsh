@@ -162,6 +162,8 @@ PROMPT_TEXT="$(__richhistory_codex_autosuggest_build_prompt "$(__richhistory_cod
 assert_contains "$PROMPT_TEXT" 'Most recent executed command: @g codexの設定ファイルはどこ？' "prompt should include the last command"
 assert_contains "$PROMPT_TEXT" 'You may inspect recent shell history with richhistory' "prompt should mention richhistory"
 assert_contains "$PROMPT_TEXT" "richhistory show --cwd \"$PWD\" -n 20 --json" "prompt should include cwd richhistory hint"
+assert_contains "$PROMPT_TEXT" "richhistory show --status fail -n 10 --json" "prompt should include failed command richhistory hint"
+assert_contains "$PROMPT_TEXT" "richhistory search <query> --field stdout --n 20 --json" "prompt should include stdout richhistory hint"
 
 reset_state
 CODEX_PRIMARY_RESPONSE="git status"
