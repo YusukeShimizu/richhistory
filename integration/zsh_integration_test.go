@@ -39,7 +39,14 @@ func TestZshIntegrationCapturesCommands(t *testing.T) {
 	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
 	stateRoot := t.TempDir()
 	configRoot := t.TempDir()
-	ptmx, cmd, buffer, readDone := startShell(t, binPath, "richhistory", stateRoot, configRoot)
+	ptmx, cmd, buffer, readDone := startShell(
+		t,
+		binPath,
+		"richhistory",
+		stateRoot,
+		configRoot,
+		map[string]string{"WEZTERM_PANE": "1"},
+	)
 	defer ptmx.Close()
 
 	waitForPrompt(t, buffer)
@@ -56,6 +63,9 @@ func TestZshIntegrationCapturesCommands(t *testing.T) {
 
 	assertSingleSession(t, events)
 	assertCommand(t, events, "echo hello", func(item event) {
+		if item.CaptureMode != "full" {
+			t.Fatalf("expected full capture mode: %#v", item)
+		}
 		if !strings.Contains(item.StdoutText, "hello") {
 			t.Fatalf("echo output missing: %#v", item)
 		}
@@ -72,30 +82,31 @@ func TestZshIntegrationCapturesCommands(t *testing.T) {
 	})
 }
 
-func TestZshIntegrationProtectsDefaultInteractiveCommands(t *testing.T) {
+func TestZshIntegrationRecordsMetadataOutsideWezTerm(t *testing.T) {
 	t.Parallel()
 
 	repoRoot := filepath.Dir(mustGetwd(t))
 	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
 	stateRoot := t.TempDir()
 	configRoot := t.TempDir()
-	writeExecutable(t, filepath.Join(filepath.Dir(binPath), "codex"), interactiveProbeScript)
-
-	ptmx, cmd, buffer, readDone := startShell(t, binPath, "richhistory", stateRoot, configRoot)
+	ptmx, cmd, buffer, readDone := startShell(
+		t,
+		binPath,
+		"richhistory",
+		stateRoot,
+		configRoot,
+		map[string]string{"WEZTERM_PANE": ""},
+	)
 	defer ptmx.Close()
 
 	waitForPrompt(t, buffer)
-	start := buffer.Len()
-	runCommand(t, ptmx, buffer, "codex")
+	runCommand(t, ptmx, buffer, "echo hello")
+	runCommand(t, ptmx, buffer, "ls /definitely-missing")
+	runCommand(t, ptmx, buffer, "true")
 	exitShell(t, ptmx, cmd, readDone)
 
-	segment := buffer.Since(start)
-	if !strings.Contains(segment, "tty-ok") {
-		t.Fatalf("expected interactive command to keep tty, got output: %s", segment)
-	}
-
 	events := readEvents(t, filepath.Join(stateRoot, "richhistory", "events"))
-	assertCommand(t, events, "codex", func(item event) {
+	assertCommand(t, events, "echo hello", func(item event) {
 		if item.CaptureMode != "metadata" {
 			t.Fatalf("expected metadata capture mode: %#v", item)
 		}
@@ -103,35 +114,15 @@ func TestZshIntegrationProtectsDefaultInteractiveCommands(t *testing.T) {
 			t.Fatalf("metadata command should not capture output: %#v", item)
 		}
 	})
-}
-
-func TestZshIntegrationForceFullOverrideCapturesTTYFailure(t *testing.T) {
-	t.Parallel()
-
-	repoRoot := filepath.Dir(mustGetwd(t))
-	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
-	stateRoot := t.TempDir()
-	configRoot := t.TempDir()
-	writeExecutable(t, filepath.Join(filepath.Dir(binPath), "codex"), interactiveProbeScript)
-	writeConfig(t, configRoot, `{
-  "force_full_command_patterns": ["^codex$"]
-}`)
-
-	ptmx, cmd, buffer, readDone := startShell(t, binPath, "richhistory", stateRoot, configRoot)
-	defer ptmx.Close()
-
-	waitForPrompt(t, buffer)
-	runCommand(t, ptmx, buffer, "codex")
-	runCommand(t, ptmx, buffer, "true")
-	exitShell(t, ptmx, cmd, readDone)
-
-	events := readEvents(t, filepath.Join(stateRoot, "richhistory", "events"))
-	assertCommand(t, events, "codex", func(item event) {
-		if item.CaptureMode != "full" {
-			t.Fatalf("expected full capture mode: %#v", item)
+	assertCommand(t, events, "ls /definitely-missing", func(item event) {
+		if item.CaptureMode != "metadata" {
+			t.Fatalf("expected metadata capture mode: %#v", item)
 		}
-		if item.ExitCode == 0 || !strings.Contains(item.StderrText, "stdin is not a terminal") {
-			t.Fatalf("expected tty failure to be captured: %#v", item)
+		if item.ExitCode == 0 {
+			t.Fatalf("expected failing command to keep exit code: %#v", item)
+		}
+		if item.StdoutText != "" || item.StderrText != "" {
+			t.Fatalf("metadata command should not capture output: %#v", item)
 		}
 	})
 }
@@ -158,6 +149,7 @@ func startShell(
 	commandName string,
 	stateRoot string,
 	configRoot string,
+	extraEnv map[string]string,
 ) (*os.File, *exec.Cmd, *syncBuffer, <-chan error) {
 	t.Helper()
 
@@ -184,6 +176,9 @@ func startShell(
 		"XDG_STATE_HOME="+stateRoot,
 		"XDG_CONFIG_HOME="+configRoot,
 	)
+	for key, value := range extraEnv {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 
 	ptmx, ptyErr := pty.Start(cmd)
 	if ptyErr != nil {
@@ -326,26 +321,6 @@ func assertCommand(t *testing.T, events []event, command string, check func(even
 	t.Fatalf("command %q not found in events: %#v", command, events)
 }
 
-func writeExecutable(t *testing.T, path string, body string) {
-	t.Helper()
-
-	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
-		t.Fatalf("WriteFile executable returned error: %v", err)
-	}
-}
-
-func writeConfig(t *testing.T, configRoot string, body string) {
-	t.Helper()
-
-	path := filepath.Join(configRoot, "richhistory", "config.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		t.Fatalf("MkdirAll config dir returned error: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(body+"\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile config returned error: %v", err)
-	}
-}
-
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 
@@ -394,13 +369,3 @@ func (buffer *syncBuffer) String() string {
 
 	return buffer.buf.String()
 }
-
-const interactiveProbeScript = `#!/bin/sh
-if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
-  echo "tty-ok"
-  exit 0
-fi
-
-echo "stdin is not a terminal" >&2
-exit 64
-`

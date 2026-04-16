@@ -84,26 +84,19 @@ richhistory show <event-id>
 richhistory search <query>
 ```
 
-`richhistory` stores local NDJSON files under XDG state/config directories, rotates event files, and keeps capture bounded. Fullscreen or raw-TTY tools are recorded as metadata-only entries.
+`richhistory` stores local NDJSON files under XDG state/config directories, rotates event files, and keeps capture bounded.
 
-## Interactive Command Safety
+## WezTerm Output Capture
 
-`richhistory` captures output by swapping `stdout` and `stderr` in `preexec`. That can break interactive CLIs which expect real terminal file descriptors. To keep those tools usable, `richhistory` defaults many known interactive commands to `metadata` capture mode instead of full output capture.
+`richhistory` only captures `stdout` and `stderr` when the shell is running inside WezTerm. It detects that by checking `WEZTERM_PANE` in the shell hook.
 
 Capture mode precedence is:
 
 - `ignore_command_patterns` or `ignore_cwd_patterns`: `skip`
-- `force_full_command_patterns`: `full`
-- built-in interactive command list or `metadata_command_names`: `metadata`
-- everything else: `full`
+- `WEZTERM_PANE` is set: `full`
+- otherwise: `metadata`
 
-Built-in `metadata` defaults:
-
-- AI CLIs: `aider`, `claude`, `claudecode`, `codex`, `gemini`, `goose`, `opencode`
-- Editors and pagers: `emacs`, `helix`, `hx`, `kak`, `less`, `man`, `more`, `most`, `nano`, `nvim`, `vi`, `vim`
-- Remote and multiplexers: `mosh`, `screen`, `sftp`, `ssh`, `tmux`, `zellij`
-- TUI tools: `atop`, `btop`, `gitui`, `htop`, `k9s`, `lazygit`, `mc`, `nnn`, `ranger`, `tig`, `top`, `watch`, `yazi`
-- Debuggers: `dlv`, `gdb`, `lldb`
+Outside WezTerm, events still record command text, cwd, exit status, duration, and session metadata, but `stdout` and `stderr` stay empty.
 
 Config example:
 
@@ -111,28 +104,20 @@ Config example:
 {
   "ignore_command_patterns": ["^secret "],
   "ignore_cwd_patterns": [],
-  "metadata_command_names": ["my-interactive-cli"],
-  "force_full_command_patterns": ["^codex exec --json$"],
-  "auto_add_metadata_commands": false
+  "max_stdout_bytes": 65536,
+  "max_stderr_bytes": 32768
 }
 ```
 
-Use `metadata_command_names` when a command should stay usable but still be recorded as an event. Use `force_full_command_patterns` only when you accept the risk that an interactive command may lose its terminal behavior.
-
-If you opt into `"auto_add_metadata_commands": true`, `richhistory` will add a command basename to `metadata_command_names` when a short-lived `full` capture fails with a terminal-related error such as `not a tty` or `stdin is not a terminal`.
-
 ## Known Limitations
 
-- The default protection is name-based. Wrapper scripts or renamed binaries can still slip through.
-- A broad default list avoids breakage, but it also means some commands that could have been fully captured will be recorded as metadata-only.
-- Auto-add is conservative and off by default. Unknown commands can still fail once before being learned.
-- `force_full_command_patterns` can re-introduce the original TTY breakage for matching commands.
+- Output capture is intentionally unavailable outside WezTerm.
+- Inside WezTerm, `richhistory` still captures output by swapping `stdout` and `stderr` in `preexec`, so interactive programs may still observe non-terminal file descriptors.
 
 ## Planned Improvements
 
-- Detect interactive behavior from shell-visible terminal signals instead of relying mostly on command names.
-- Support finer-grained policies so one binary can stay `metadata` by default while known non-interactive subcommands use `full`.
-- Add a simpler shell-side escape hatch for one-off overrides without editing config files.
+- Add a capture backend that preserves terminal semantics while still recording output.
+- Expand shell support beyond `zsh`.
 
 ## Optional Examples
 

@@ -4,6 +4,6 @@
 
 The current version targets `zsh` and stores local NDJSON event files. It is meant to stay small, inspectable, and easy to use from the command line.
 
-Because shell-level output capture can interfere with interactive terminal programs, `richhistory` prefers preserving interactive UX over forcing full capture. Known interactive commands fall back to metadata-only events unless the user explicitly overrides that behavior.
+The current output capture path is intentionally narrow: `richhistory` only captures `stdout` and `stderr` when running inside WezTerm. In other terminals it still records the command lifecycle, but leaves output fields empty.
 
 Optional helpers can build on top of that journal. AI-assisted workflows are examples of that extension point and live under `contrib/`.

@@ -158,6 +158,7 @@ func (command recordCommand) executeStart(cfg config.Config, root string, args [
 	ttyName := startFS.String("tty", "", "tty name")
 	pwd := startFS.String("pwd", "", "pwd")
 	commandText := startFS.String("command", "", "command")
+	captureOutput := startFS.Bool("capture-output", false, "capture stdout/stderr")
 	startedAtRaw := startFS.String("started-at", "", "start time")
 	parseErr := startFS.Parse(args)
 	if parseErr != nil {
@@ -175,15 +176,16 @@ func (command recordCommand) executeStart(cfg config.Config, root string, args [
 	}
 
 	result, startErr := record.Start(root, cfg, record.StartInput{
-		SessionID:   *sessionID,
-		SessionName: *sessionName,
-		Seq:         *seq,
-		Shell:       *shellName,
-		ShellPID:    *shellPID,
-		TTY:         *ttyName,
-		Command:     *commandText,
-		PWD:         *pwd,
-		StartedAt:   startedAt,
+		SessionID:     *sessionID,
+		SessionName:   *sessionName,
+		Seq:           *seq,
+		Shell:         *shellName,
+		ShellPID:      *shellPID,
+		TTY:           *ttyName,
+		Command:       *commandText,
+		PWD:           *pwd,
+		CaptureOutput: *captureOutput,
+		StartedAt:     startedAt,
 	})
 	if startErr != nil {
 		fmt.Fprintf(command.runtime.stderr, "record start: %v\n", startErr)
