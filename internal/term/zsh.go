@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const weztermCaptureStartLine = -20000
+
 func ZshInit(commandName string, sessionName string) string {
 	quotedCommand := ShellQuote(commandName)
 	lines := []string{
@@ -14,8 +16,8 @@ func ZshInit(commandName string, sessionName string) string {
 		`typeset -g RICHHISTORY_CAPTURE_MODE="${RICHHISTORY_CAPTURE_MODE:-skip}"`,
 		`typeset -g RICHHISTORY_EVENT_ID="${RICHHISTORY_EVENT_ID:-}"`,
 		`typeset -g RICHHISTORY_EVENT_STATE="${RICHHISTORY_EVENT_STATE:-}"`,
-		`typeset -g RICHHISTORY_STDOUT_FILE="${RICHHISTORY_STDOUT_FILE:-}"`,
-		`typeset -g RICHHISTORY_STDERR_FILE="${RICHHISTORY_STDERR_FILE:-}"`,
+		`typeset -g RICHHISTORY_CAPTURE_BEFORE_FILE="${RICHHISTORY_CAPTURE_BEFORE_FILE:-}"`,
+		`typeset -g RICHHISTORY_CAPTURE_AFTER_FILE="${RICHHISTORY_CAPTURE_AFTER_FILE:-}"`,
 	}
 	if sessionName != "" {
 		lines = append(lines, "typeset -g RICHHISTORY_SESSION_NAME="+ShellQuote(sessionName))
@@ -35,7 +37,7 @@ func zshHookLines(commandName string) []string {
 		`  local assignments`,
 		`  started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"`,
 		`  tty_name="$(tty 2>/dev/null || printf 'unknown')"`,
-		`  if [[ -n "${WEZTERM_PANE:-}" ]]; then`,
+		`  if [[ -n "${WEZTERM_PANE:-}" ]] && command -v wezterm >/dev/null 2>&1; then`,
 		`    capture_output=true`,
 		`  else`,
 		`    capture_output=false`,
@@ -46,15 +48,19 @@ func zshHookLines(commandName string) []string {
 		),
 		`  eval "$assignments"`,
 		`  if [[ "$RICHHISTORY_CAPTURE_MODE" == "full" ]]; then`,
-		`    exec 3>&1 4>&2`,
-		`    exec 1> >(tee -a "$RICHHISTORY_STDOUT_FILE") 2> >(tee -a "$RICHHISTORY_STDERR_FILE" >&2)`,
+		fmt.Sprintf(
+			`    wezterm cli get-text --pane-id "$WEZTERM_PANE" --start-line %d >| "$RICHHISTORY_CAPTURE_BEFORE_FILE" 2>/dev/null || true`,
+			weztermCaptureStartLine,
+		),
 		`  fi`,
 		`}`,
 		`function __richhistory_precmd() {`,
 		`  local exit_code="$?"`,
 		`  if [[ "$RICHHISTORY_CAPTURE_MODE" == "full" ]]; then`,
-		`    exec 1>&3 2>&4`,
-		`    exec 3>&- 4>&-`,
+		fmt.Sprintf(
+			`    wezterm cli get-text --pane-id "$WEZTERM_PANE" --start-line %d >| "$RICHHISTORY_CAPTURE_AFTER_FILE" 2>/dev/null || true`,
+			weztermCaptureStartLine,
+		),
 		`  fi`,
 		fmt.Sprintf(
 			`  command %s record finish --state-file "$RICHHISTORY_EVENT_STATE" --pwd-after "$PWD" --exit-code "$exit_code" --finished-at "$(date -u +"%%Y-%%m-%%dT%%H:%%M:%%SZ")" >/dev/null 2>&1 || true`,
@@ -63,20 +69,16 @@ func zshHookLines(commandName string) []string {
 		`  RICHHISTORY_CAPTURE_MODE=skip`,
 		`  RICHHISTORY_EVENT_ID=`,
 		`  RICHHISTORY_EVENT_STATE=`,
-		`  RICHHISTORY_STDOUT_FILE=`,
-		`  RICHHISTORY_STDERR_FILE=`,
+		`  RICHHISTORY_CAPTURE_BEFORE_FILE=`,
+		`  RICHHISTORY_CAPTURE_AFTER_FILE=`,
 		`}`,
 		`function __richhistory_zshexit() {`,
-		`  if [[ "$RICHHISTORY_CAPTURE_MODE" == "full" ]]; then`,
-		`    exec 1>&3 2>&4`,
-		`    exec 3>&- 4>&-`,
-		`  fi`,
-		`  rm -f "$RICHHISTORY_EVENT_STATE" "$RICHHISTORY_STDOUT_FILE" "$RICHHISTORY_STDERR_FILE" >/dev/null 2>&1 || true`,
+		`  rm -f "$RICHHISTORY_EVENT_STATE" "$RICHHISTORY_CAPTURE_BEFORE_FILE" "$RICHHISTORY_CAPTURE_AFTER_FILE" >/dev/null 2>&1 || true`,
 		`  RICHHISTORY_CAPTURE_MODE=skip`,
 		`  RICHHISTORY_EVENT_ID=`,
 		`  RICHHISTORY_EVENT_STATE=`,
-		`  RICHHISTORY_STDOUT_FILE=`,
-		`  RICHHISTORY_STDERR_FILE=`,
+		`  RICHHISTORY_CAPTURE_BEFORE_FILE=`,
+		`  RICHHISTORY_CAPTURE_AFTER_FILE=`,
 		`}`,
 		`add-zsh-hook preexec __richhistory_preexec`,
 		`add-zsh-hook precmd __richhistory_precmd`,
@@ -93,8 +95,8 @@ func ShellAssignments(values map[string]string) string {
 		"RICHHISTORY_CAPTURE_MODE",
 		"RICHHISTORY_EVENT_ID",
 		"RICHHISTORY_EVENT_STATE",
-		"RICHHISTORY_STDOUT_FILE",
-		"RICHHISTORY_STDERR_FILE",
+		"RICHHISTORY_CAPTURE_BEFORE_FILE",
+		"RICHHISTORY_CAPTURE_AFTER_FILE",
 	}
 	lines := make([]string, 0, len(keys))
 	for _, key := range keys {

@@ -24,7 +24,7 @@ stderr:
 It records:
 
 - the command that ran
-- `stdout` and `stderr` previews
+- pane output previews when capture is available
 - working directory before and after execution
 - exit status, duration, and session identity
 
@@ -32,7 +32,7 @@ It records:
 
 | Need | Built-in shell history | `richhistory` |
 | --- | --- | --- |
-| See what a command printed | command text only | bounded `stdout` and `stderr` previews |
+| See what a command printed | command text only | bounded output previews |
 | Understand where it ran | usually current shell context only | `pwd_before`, `pwd_after`, session name, exit status |
 | Revisit a failure later | manual memory and scrollback | `show` and `search` across stored shell events |
 
@@ -88,7 +88,7 @@ richhistory search <query>
 
 ## WezTerm Output Capture
 
-`richhistory` only captures `stdout` and `stderr` when the shell is running inside WezTerm. It detects that by checking `WEZTERM_PANE` in the shell hook.
+`richhistory` only captures output when the shell is running inside WezTerm and the `wezterm` CLI is available. It detects that from `WEZTERM_PANE`, snapshots pane text with `wezterm cli get-text`, and stores the pre/post delta.
 
 Capture mode precedence is:
 
@@ -96,7 +96,9 @@ Capture mode precedence is:
 - `WEZTERM_PANE` is set: `full`
 - otherwise: `metadata`
 
-Outside WezTerm, events still record command text, cwd, exit status, duration, and session metadata, but `stdout` and `stderr` stay empty.
+Outside WezTerm, events still record command text, cwd, exit status, duration, and session metadata, but output fields stay empty.
+
+Because WezTerm exposes pane text rather than stream-separated pipes, pane capture is stored in `stdout_text`. `stderr_text` remains empty for that capture path.
 
 Config example:
 
@@ -112,11 +114,12 @@ Config example:
 ## Known Limitations
 
 - Output capture is intentionally unavailable outside WezTerm.
-- Inside WezTerm, `richhistory` still captures output by swapping `stdout` and `stderr` in `preexec`, so interactive programs may still observe non-terminal file descriptors.
+- WezTerm capture reads pane text, so it cannot distinguish `stdout` from `stderr`.
+- Pane snapshots depend on the available scrollback range and the `wezterm` CLI succeeding.
 
 ## Planned Improvements
 
-- Add a capture backend that preserves terminal semantics while still recording output.
+- Improve pane-diff quality for cases where the visible screen rewrites heavily during a command.
 - Expand shell support beyond `zsh`.
 
 ## Optional Examples

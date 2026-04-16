@@ -4,7 +4,7 @@
 
 - `richhistory` is a local shell journal for `zsh`.
 - It captures command lifecycle metadata plus bounded output previews.
-- Output capture is only enabled inside WezTerm.
+- Output capture is only enabled inside WezTerm when the `wezterm` CLI is available.
 - Storage is local NDJSON with rotation and pruning.
 - Optional helpers may build on top of the journal, but they are not part of the core CLI contract.
 
@@ -28,7 +28,7 @@
 
 - `ignore_command_patterns`: regex list; matching commands are skipped entirely
 - `ignore_cwd_patterns`: regex list; matching working directories are skipped entirely
-- Capture mode precedence is `skip > full in WezTerm > metadata elsewhere`
+- Capture mode precedence is `skip > full in WezTerm with wezterm CLI > metadata elsewhere`
 
 ## Event Shape
 
@@ -40,5 +40,6 @@ Each record contains:
 - timing: `started_at`, `finished_at`, `duration_ms`
 - result: `exit_code`, `capture_mode`
 - bounded outputs: `stdout_text`, `stderr_text`
+- WezTerm capture stores pane-text deltas in `stdout_text`; `stderr_text` is empty for that path
 - byte accounting: `stdout_bytes_total`, `stderr_bytes_total`, `stdout_stored_bytes`, `stderr_stored_bytes`
 - truncation flags: `stdout_truncated`, `stderr_truncated`

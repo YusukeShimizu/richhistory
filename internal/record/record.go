@@ -39,11 +39,11 @@ type StartInput struct {
 }
 
 type StartResult struct {
-	EventID     string
-	StateFile   string
-	StdoutFile  string
-	StderrFile  string
-	CaptureMode string
+	EventID           string
+	StateFile         string
+	CaptureBeforeFile string
+	CaptureAfterFile  string
+	CaptureMode       string
 }
 
 type FinishInput struct {
@@ -54,19 +54,19 @@ type FinishInput struct {
 }
 
 type liveState struct {
-	EventID     string    `json:"event_id"`
-	SessionID   string    `json:"session_id"`
-	SessionName string    `json:"session_name"`
-	Seq         int       `json:"seq"`
-	Shell       string    `json:"shell"`
-	ShellPID    int       `json:"shell_pid"`
-	TTY         string    `json:"tty"`
-	Command     string    `json:"command"`
-	PWDBefore   string    `json:"pwd_before"`
-	StartedAt   time.Time `json:"started_at"`
-	StdoutFile  string    `json:"stdout_file,omitempty"`
-	StderrFile  string    `json:"stderr_file,omitempty"`
-	CaptureMode string    `json:"capture_mode"`
+	EventID           string    `json:"event_id"`
+	SessionID         string    `json:"session_id"`
+	SessionName       string    `json:"session_name"`
+	Seq               int       `json:"seq"`
+	Shell             string    `json:"shell"`
+	ShellPID          int       `json:"shell_pid"`
+	TTY               string    `json:"tty"`
+	Command           string    `json:"command"`
+	PWDBefore         string    `json:"pwd_before"`
+	StartedAt         time.Time `json:"started_at"`
+	CaptureBeforeFile string    `json:"capture_before_file,omitempty"`
+	CaptureAfterFile  string    `json:"capture_after_file,omitempty"`
+	CaptureMode       string    `json:"capture_mode"`
 }
 
 func Start(root string, cfg config.Config, input StartInput) (StartResult, error) {
@@ -115,11 +115,11 @@ func Start(root string, cfg config.Config, input StartInput) (StartResult, error
 	}
 
 	return StartResult{
-		EventID:     eventID,
-		StateFile:   stateFile,
-		StdoutFile:  state.StdoutFile,
-		StderrFile:  state.StderrFile,
-		CaptureMode: state.CaptureMode,
+		EventID:           eventID,
+		StateFile:         stateFile,
+		CaptureBeforeFile: state.CaptureBeforeFile,
+		CaptureAfterFile:  state.CaptureAfterFile,
+		CaptureMode:       state.CaptureMode,
 	}, nil
 }
 
@@ -146,15 +146,11 @@ func Finish(root string, cfg config.Config, input FinishInput) (store.Event, boo
 		return store.Event{}, false, fmt.Errorf("resolve hostname: %w", hostErr)
 	}
 
-	stdoutBound, readStdoutErr := readBoundedOutput(state.StdoutFile, cfg.MaxStdoutBytes)
-	if readStdoutErr != nil {
-		return store.Event{}, false, readStdoutErr
+	stdoutBound, captureErr := readCapturedOutput(state, cfg)
+	if captureErr != nil {
+		return store.Event{}, false, captureErr
 	}
-
-	stderrBound, readStderrErr := readBoundedOutput(state.StderrFile, cfg.MaxStderrBytes)
-	if readStderrErr != nil {
-		return store.Event{}, false, readStderrErr
-	}
+	stderrBound := sanitize.BoundedText{}
 
 	finishedAt := input.FinishedAt.UTC()
 	duration := finishedAt.Sub(state.StartedAt)
@@ -221,17 +217,17 @@ func prepareOutputFiles(livePath string, state *liveState) error {
 		return nil
 	}
 
-	state.StdoutFile = filepath.Join(livePath, state.EventID+".stdout")
-	state.StderrFile = filepath.Join(livePath, state.EventID+".stderr")
+	state.CaptureBeforeFile = filepath.Join(livePath, state.EventID+".before")
+	state.CaptureAfterFile = filepath.Join(livePath, state.EventID+".after")
 
-	stdoutErr := os.WriteFile(state.StdoutFile, nil, filePerm)
-	if stdoutErr != nil {
-		return fmt.Errorf("create stdout file: %w", stdoutErr)
+	beforeErr := os.WriteFile(state.CaptureBeforeFile, nil, filePerm)
+	if beforeErr != nil {
+		return fmt.Errorf("create capture before file: %w", beforeErr)
 	}
 
-	stderrErr := os.WriteFile(state.StderrFile, nil, filePerm)
-	if stderrErr != nil {
-		return fmt.Errorf("create stderr file: %w", stderrErr)
+	afterErr := os.WriteFile(state.CaptureAfterFile, nil, filePerm)
+	if afterErr != nil {
+		return fmt.Errorf("create capture after file: %w", afterErr)
 	}
 
 	return nil
@@ -270,25 +266,44 @@ func loadState(path string) (liveState, error) {
 	return state, nil
 }
 
-func readBoundedOutput(path string, maxBytes int) (sanitize.BoundedText, error) {
+func readOutputFile(path string) ([]byte, error) {
 	if path == "" {
-		return sanitize.BoundedText{}, nil
+		return nil, nil
 	}
 
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
 		if errors.Is(readErr, os.ErrNotExist) {
-			return sanitize.BoundedText{}, nil
+			return nil, nil
 		}
 
-		return sanitize.BoundedText{}, fmt.Errorf("read output file %s: %w", path, readErr)
+		return nil, fmt.Errorf("read output file %s: %w", path, readErr)
 	}
 
-	return sanitize.BoundText(data, maxBytes), nil
+	return data, nil
+}
+
+func readCapturedOutput(state liveState, cfg config.Config) (sanitize.BoundedText, error) {
+	if state.CaptureMode != captureModeFull {
+		return sanitize.BoundedText{}, nil
+	}
+
+	beforeData, beforeErr := readOutputFile(state.CaptureBeforeFile)
+	if beforeErr != nil {
+		return sanitize.BoundedText{}, beforeErr
+	}
+	afterData, afterErr := readOutputFile(state.CaptureAfterFile)
+	if afterErr != nil {
+		return sanitize.BoundedText{}, afterErr
+	}
+
+	captured := paneOutputDelta(beforeData, afterData)
+	stdout := sanitize.BoundText([]byte(captured), cfg.MaxStdoutBytes)
+	return stdout, nil
 }
 
 func cleanup(state liveState, stateFile string) error {
-	for _, path := range []string{state.StdoutFile, state.StderrFile, stateFile} {
+	for _, path := range []string{state.CaptureBeforeFile, state.CaptureAfterFile, stateFile} {
 		if path == "" {
 			continue
 		}
@@ -327,4 +342,29 @@ func newEventID(startedAt time.Time) (string, error) {
 func boundCommand(command string, maxBytes int) string {
 	bounded := sanitize.BoundText([]byte(command), maxBytes)
 	return bounded.Text
+}
+
+func paneOutputDelta(beforeData []byte, afterData []byte) string {
+	before := sanitize.Clean(beforeData)
+	after := sanitize.Clean(afterData)
+	if before == "" {
+		return after
+	}
+	if strings.HasPrefix(after, before) {
+		return after[len(before):]
+	}
+
+	prefixLen := commonPrefixLen(before, after)
+	return after[prefixLen:]
+}
+
+func commonPrefixLen(left string, right string) int {
+	maxLen := min(len(left), len(right))
+
+	index := 0
+	for index < maxLen && left[index] == right[index] {
+		index++
+	}
+
+	return index
 }

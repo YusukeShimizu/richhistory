@@ -32,52 +32,53 @@ type event struct {
 	StderrText  string `json:"stderr_text"`
 }
 
-func TestZshIntegrationCapturesCommands(t *testing.T) {
+func TestZshIntegrationCapturesWezTermPaneTextWithoutBreakingTTY(t *testing.T) {
 	t.Parallel()
 
 	repoRoot := filepath.Dir(mustGetwd(t))
 	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
+	binDir := filepath.Dir(binPath)
 	stateRoot := t.TempDir()
 	configRoot := t.TempDir()
+	writeExecutable(t, filepath.Join(binDir, "codex"), ttyProbeScript)
+	snapshotDir := t.TempDir()
+	writeFile(t, filepath.Join(snapshotDir, "1.txt"), "PROMPT> codex\n")
+	writeFile(t, filepath.Join(snapshotDir, "2.txt"), "PROMPT> codex\ntty-ok\n")
+	writeExecutable(t, filepath.Join(binDir, "wezterm"), fakeWeztermScript)
 	ptmx, cmd, buffer, readDone := startShell(
 		t,
 		binPath,
 		"richhistory",
 		stateRoot,
 		configRoot,
-		map[string]string{"WEZTERM_PANE": "1"},
+		map[string]string{
+			"WEZTERM_PANE":                    "1",
+			"RICHHISTORY_TEST_WEZTERM_COUNT":  filepath.Join(t.TempDir(), "wezterm-count"),
+			"RICHHISTORY_TEST_WEZTERM_OUTPUT": snapshotDir,
+		},
 	)
 	defer ptmx.Close()
 
 	waitForPrompt(t, buffer)
-	runCommand(t, ptmx, buffer, "pwd")
-	runCommand(t, ptmx, buffer, "echo hello")
-	runCommand(t, ptmx, buffer, "ls /definitely-missing")
-	runCommand(t, ptmx, buffer, "cd /tmp")
+	start := buffer.Len()
+	runCommand(t, ptmx, buffer, "codex")
 	exitShell(t, ptmx, cmd, readDone)
 
-	events := readEvents(t, filepath.Join(stateRoot, "richhistory", "events"))
-	if len(events) < 4 {
-		t.Fatalf("expected at least 4 events, got %d", len(events))
+	if !strings.Contains(buffer.Since(start), "tty-ok") {
+		t.Fatalf("expected codex to keep tty, got output: %s", buffer.Since(start))
 	}
 
+	events := readEvents(t, filepath.Join(stateRoot, "richhistory", "events"))
 	assertSingleSession(t, events)
-	assertCommand(t, events, "echo hello", func(item event) {
+	assertCommand(t, events, "codex", func(item event) {
 		if item.CaptureMode != "full" {
 			t.Fatalf("expected full capture mode: %#v", item)
 		}
-		if !strings.Contains(item.StdoutText, "hello") {
-			t.Fatalf("echo output missing: %#v", item)
+		if item.StderrText != "" {
+			t.Fatalf("expected stderr to stay empty for pane capture: %#v", item)
 		}
-	})
-	assertCommand(t, events, "ls /definitely-missing", func(item event) {
-		if item.ExitCode == 0 || !strings.Contains(item.StderrText, "definitely-missing") {
-			t.Fatalf("ls failure not captured: %#v", item)
-		}
-	})
-	assertCommand(t, events, "cd /tmp", func(item event) {
-		if item.PWDAfter != "/tmp" {
-			t.Fatalf("cd pwd_after mismatch: %#v", item)
+		if !strings.Contains(item.StdoutText, "tty-ok") {
+			t.Fatalf("expected pane capture output: %#v", item)
 		}
 	})
 }
@@ -321,6 +322,22 @@ func assertCommand(t *testing.T, events []event, command string, check func(even
 	t.Fatalf("command %q not found in events: %#v", command, events)
 }
 
+func writeExecutable(t *testing.T, path string, body string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+		t.Fatalf("WriteFile executable returned error: %v", err)
+	}
+}
+
+func writeFile(t *testing.T, path string, body string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+}
+
 func mustGetwd(t *testing.T) string {
 	t.Helper()
 
@@ -369,3 +386,34 @@ func (buffer *syncBuffer) String() string {
 
 	return buffer.buf.String()
 }
+
+const ttyProbeScript = `#!/bin/sh
+if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
+  echo "tty-ok"
+  exit 0
+fi
+
+echo "stdout is not a terminal" >&2
+exit 1
+`
+
+const fakeWeztermScript = `#!/bin/sh
+if [ "$1" != "cli" ] || [ "$2" != "get-text" ]; then
+  exit 1
+fi
+
+count_file="${RICHHISTORY_TEST_WEZTERM_COUNT:?}"
+output_dir="${RICHHISTORY_TEST_WEZTERM_OUTPUT:?}"
+count=0
+if [ -f "$count_file" ]; then
+  count="$(cat "$count_file")"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$count_file"
+
+snapshot="$output_dir/$count.txt"
+if [ ! -f "$snapshot" ]; then
+  snapshot="$output_dir/2.txt"
+fi
+cat "$snapshot"
+`

@@ -193,11 +193,11 @@ func (command recordCommand) executeStart(cfg config.Config, root string, args [
 	}
 
 	fmt.Fprint(command.runtime.stdout, term.ShellAssignments(map[string]string{
-		"RICHHISTORY_CAPTURE_MODE": result.CaptureMode,
-		"RICHHISTORY_EVENT_ID":     result.EventID,
-		"RICHHISTORY_EVENT_STATE":  result.StateFile,
-		"RICHHISTORY_STDOUT_FILE":  result.StdoutFile,
-		"RICHHISTORY_STDERR_FILE":  result.StderrFile,
+		"RICHHISTORY_CAPTURE_MODE":        result.CaptureMode,
+		"RICHHISTORY_EVENT_ID":            result.EventID,
+		"RICHHISTORY_EVENT_STATE":         result.StateFile,
+		"RICHHISTORY_CAPTURE_BEFORE_FILE": result.CaptureBeforeFile,
+		"RICHHISTORY_CAPTURE_AFTER_FILE":  result.CaptureAfterFile,
 	}))
 	fmt.Fprint(command.runtime.stdout, "\n")
 	return subcommands.ExitSuccess
