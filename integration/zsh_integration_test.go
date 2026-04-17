@@ -37,14 +37,15 @@ func TestZshIntegrationCapturesWezTermPaneTextWithoutBreakingTTY(t *testing.T) {
 
 	repoRoot := filepath.Dir(mustGetwd(t))
 	binPath := buildBinary(t, repoRoot, "richhistory", "./cmd/richhistory")
-	binDir := filepath.Dir(binPath)
 	stateRoot := t.TempDir()
 	configRoot := t.TempDir()
-	writeExecutable(t, filepath.Join(binDir, "codex"), ttyProbeScript)
+	writeExecutable(t, filepath.Join(filepath.Dir(binPath), "codex"), ttyProbeScript)
 	snapshotDir := t.TempDir()
 	writeFile(t, filepath.Join(snapshotDir, "1.txt"), "PROMPT> codex\n")
 	writeFile(t, filepath.Join(snapshotDir, "2.txt"), "PROMPT> codex\ntty-ok\n")
-	writeExecutable(t, filepath.Join(binDir, "wezterm"), fakeWeztermScript)
+	weztermDir := t.TempDir()
+	weztermPath := filepath.Join(weztermDir, "wezterm")
+	writeExecutable(t, weztermPath, fakeWeztermScript)
 	ptmx, cmd, buffer, readDone := startShell(
 		t,
 		binPath,
@@ -53,6 +54,7 @@ func TestZshIntegrationCapturesWezTermPaneTextWithoutBreakingTTY(t *testing.T) {
 		configRoot,
 		map[string]string{
 			"WEZTERM_PANE":                    "1",
+			"RICHHISTORY_WEZTERM_CLI":         weztermPath,
 			"RICHHISTORY_TEST_WEZTERM_COUNT":  filepath.Join(t.TempDir(), "wezterm-count"),
 			"RICHHISTORY_TEST_WEZTERM_OUTPUT": snapshotDir,
 		},
@@ -74,11 +76,11 @@ func TestZshIntegrationCapturesWezTermPaneTextWithoutBreakingTTY(t *testing.T) {
 		if item.CaptureMode != "full" {
 			t.Fatalf("expected full capture mode: %#v", item)
 		}
-		if item.StderrText != "" {
-			t.Fatalf("expected stderr to stay empty for pane capture: %#v", item)
-		}
 		if !strings.Contains(item.StdoutText, "tty-ok") {
 			t.Fatalf("expected pane capture output: %#v", item)
+		}
+		if !strings.Contains(item.StderrText, "tty-ok") {
+			t.Fatalf("expected pane capture to remain searchable via stderr: %#v", item)
 		}
 	})
 }
@@ -152,18 +154,32 @@ func startShell(
 	configRoot string,
 	extraEnv map[string]string,
 ) (*os.File, *exec.Cmd, *syncBuffer, <-chan error) {
+	return startShellWithRC(t, binPath, commandName, stateRoot, configRoot, extraEnv, nil)
+}
+
+func startShellWithRC(
+	t *testing.T,
+	binPath string,
+	commandName string,
+	stateRoot string,
+	configRoot string,
+	extraEnv map[string]string,
+	extraRCLines []string,
+) (*os.File, *exec.Cmd, *syncBuffer, <-chan error) {
 	t.Helper()
 
 	binDir := filepath.Dir(binPath)
 	home := t.TempDir()
 	zdotdir := t.TempDir()
 	rcfile := filepath.Join(zdotdir, ".zshrc")
-	rc := strings.Join([]string{
+	rcLines := []string{
 		fmt.Sprintf("export PATH=%s:$PATH", binDir),
 		"PS1='PROMPT> '",
 		fmt.Sprintf("eval \"$(%s term init zsh --name integration)\"", commandName),
 		"",
-	}, "\n")
+	}
+	rcLines = append(rcLines, extraRCLines...)
+	rc := strings.Join(rcLines, "\n")
 
 	writeErr := os.WriteFile(rcfile, []byte(rc), 0o600)
 	if writeErr != nil {

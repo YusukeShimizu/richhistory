@@ -17,6 +17,7 @@ func TestStartFinishWritesCapturedEventAndCleansLiveFiles(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Default()
 	cfg.MaxStdoutBytes = 8
+	cfg.MaxStderrBytes = 8
 
 	startedAt := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
 	result, err := record.Start(root, cfg, record.StartInput{
@@ -64,11 +65,14 @@ func TestStartFinishWritesCapturedEventAndCleansLiveFiles(t *testing.T) {
 	if event.StdoutText != "hello wo" {
 		t.Fatalf("unexpected stdout text: %q", event.StdoutText)
 	}
-	if event.StderrText != "" {
+	if event.StderrText != "hello wo" {
 		t.Fatalf("unexpected stderr text: %q", event.StderrText)
 	}
 	if !event.StdoutTruncated {
 		t.Fatal("expected stdout truncation")
+	}
+	if !event.StderrTruncated {
+		t.Fatal("expected stderr truncation")
 	}
 
 	for _, path := range []string{result.StateFile, result.CaptureBeforeFile, result.CaptureAfterFile} {
@@ -180,6 +184,9 @@ func TestStartFinishFallsBackToCommonSuffixWhenBaselineDiffers(t *testing.T) {
 	}
 	if event.StdoutText != "new screen\nhello\n" {
 		t.Fatalf("unexpected stdout text: %q", event.StdoutText)
+	}
+	if event.StderrText != "new screen\nhello\n" {
+		t.Fatalf("unexpected stderr text: %q", event.StderrText)
 	}
 }
 

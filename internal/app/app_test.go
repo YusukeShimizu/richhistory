@@ -71,11 +71,11 @@ func TestTermInitUsesInvokedCommandName(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name       string
-		invokedAs  string
-		wantBinRef string
+		name           string
+		invokedAs      string
+		wantRecordCall string
 	}{
-		{name: "canonical", invokedAs: "richhistory", wantBinRef: "command 'richhistory' record start"},
+		{name: "canonical", invokedAs: "richhistory", wantRecordCall: `command "$RICHHISTORY_COMMAND" record start`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -86,8 +86,14 @@ func TestTermInitUsesInvokedCommandName(t *testing.T) {
 			if exitCode != 0 {
 				t.Fatalf("term init exited %d: %s", exitCode, stderr.String())
 			}
-			if !bytes.Contains(stdout.Bytes(), []byte(tc.wantBinRef)) {
-				t.Fatalf("term init output missing %q:\n%s", tc.wantBinRef, stdout.String())
+			if !bytes.Contains(stdout.Bytes(), []byte(tc.wantRecordCall)) {
+				t.Fatalf("term init output missing %q:\n%s", tc.wantRecordCall, stdout.String())
+			}
+			if !bytes.Contains(
+				stdout.Bytes(),
+				[]byte("typeset -g RICHHISTORY_COMMAND=${RICHHISTORY_COMMAND:-'richhistory'}"),
+			) {
+				t.Fatalf("term init output missing RICHHISTORY_COMMAND export:\n%s", stdout.String())
 			}
 		})
 	}
@@ -104,5 +110,52 @@ func TestUsageUsesInvokedCommandName(t *testing.T) {
 	}
 	if !bytes.Contains(stderr.Bytes(), []byte("usage: richhistory search <query>")) {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+}
+
+func TestShowCollapsesDuplicateWezTermPaneOutput(t *testing.T) {
+	state := t.TempDir()
+	configDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	root := filepath.Join(state, "richhistory", "events")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+
+	event := store.Event{
+		ID:          "event-1",
+		SessionID:   "session-1",
+		Seq:         1,
+		Shell:       "zsh",
+		ShellPID:    7,
+		TTY:         "tty1",
+		Host:        "host",
+		PWDBefore:   "/tmp",
+		PWDAfter:    "/tmp",
+		StartedAt:   time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC),
+		FinishedAt:  time.Date(2026, 4, 15, 0, 0, 1, 0, time.UTC),
+		Command:     "ls missing",
+		CaptureMode: "full",
+		StdoutText:  "missing\n",
+		StderrText:  "missing\n",
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("Marshal returned error: %v", err)
+	}
+	path := filepath.Join(root, "2026-04-15.ndjson")
+	if writeErr := os.WriteFile(path, append(encoded, '\n'), 0o600); writeErr != nil {
+		t.Fatalf("WriteFile returned error: %v", writeErr)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := app.RunAs("richhistory", []string{"show", "event-1"}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("show exited %d: %s", exitCode, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("[same as stdout; WezTerm pane capture does not distinguish streams]")) {
+		t.Fatalf("show output missing WezTerm stderr note: %s", stdout.String())
 	}
 }

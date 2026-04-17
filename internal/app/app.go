@@ -455,6 +455,10 @@ func printEvent(stdout io.Writer, event store.Event, asJSON bool) error {
 	fmt.Fprintf(stdout, "cwd_before: %s\n", event.PWDBefore)
 	fmt.Fprintf(stdout, "cwd_after: %s\n", event.PWDAfter)
 	fmt.Fprintf(stdout, "stdout:\n%s\n", event.StdoutText)
+	if event.CaptureMode == "full" && event.StdoutText != "" && event.StdoutText == event.StderrText {
+		fmt.Fprint(stdout, "stderr:\n[same as stdout; WezTerm pane capture does not distinguish streams]\n")
+		return nil
+	}
 	fmt.Fprintf(stdout, "stderr:\n%s\n", event.StderrText)
 	return nil
 }

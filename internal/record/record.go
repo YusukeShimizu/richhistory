@@ -146,11 +146,10 @@ func Finish(root string, cfg config.Config, input FinishInput) (store.Event, boo
 		return store.Event{}, false, fmt.Errorf("resolve hostname: %w", hostErr)
 	}
 
-	stdoutBound, captureErr := readCapturedOutput(state, cfg)
+	stdoutBound, stderrBound, captureErr := readCapturedOutput(state, cfg)
 	if captureErr != nil {
 		return store.Event{}, false, captureErr
 	}
-	stderrBound := sanitize.BoundedText{}
 
 	finishedAt := input.FinishedAt.UTC()
 	duration := finishedAt.Sub(state.StartedAt)
@@ -283,23 +282,24 @@ func readOutputFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-func readCapturedOutput(state liveState, cfg config.Config) (sanitize.BoundedText, error) {
+func readCapturedOutput(state liveState, cfg config.Config) (sanitize.BoundedText, sanitize.BoundedText, error) {
 	if state.CaptureMode != captureModeFull {
-		return sanitize.BoundedText{}, nil
+		return sanitize.BoundedText{}, sanitize.BoundedText{}, nil
 	}
 
 	beforeData, beforeErr := readOutputFile(state.CaptureBeforeFile)
 	if beforeErr != nil {
-		return sanitize.BoundedText{}, beforeErr
+		return sanitize.BoundedText{}, sanitize.BoundedText{}, beforeErr
 	}
 	afterData, afterErr := readOutputFile(state.CaptureAfterFile)
 	if afterErr != nil {
-		return sanitize.BoundedText{}, afterErr
+		return sanitize.BoundedText{}, sanitize.BoundedText{}, afterErr
 	}
 
 	captured := paneOutputDelta(beforeData, afterData)
 	stdout := sanitize.BoundText([]byte(captured), cfg.MaxStdoutBytes)
-	return stdout, nil
+	stderr := sanitize.BoundText([]byte(captured), cfg.MaxStderrBytes)
+	return stdout, stderr, nil
 }
 
 func cleanup(state liveState, stateFile string) error {

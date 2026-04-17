@@ -375,6 +375,9 @@ func matchesQuery(event Event, field string, query string) bool {
 		fields = []string{event.StdoutText}
 	case "stderr":
 		fields = []string{event.StderrText}
+		if event.CaptureMode == "full" && event.StderrText == "" {
+			fields = append(fields, event.StdoutText)
+		}
 	case "all", "":
 	default:
 		fields = []string{event.Command, event.PWDBefore, event.PWDAfter, event.StdoutText, event.StderrText}

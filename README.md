@@ -24,7 +24,7 @@ stderr:
 It records:
 
 - the command that ran
-- pane output previews when capture is available
+- bounded output previews when capture is available
 - working directory before and after execution
 - exit status, duration, and session identity
 
@@ -88,17 +88,17 @@ richhistory search <query>
 
 ## WezTerm Output Capture
 
-`richhistory` only captures output when the shell is running inside WezTerm and the `wezterm` CLI is available. It detects that from `WEZTERM_PANE`, snapshots pane text with `wezterm cli get-text`, and stores the pre/post delta.
+`richhistory` only captures output when the shell is running inside WezTerm and it can resolve a `wezterm` CLI. It detects that from `WEZTERM_PANE`, snapshots pane text with `wezterm cli get-text`, and stores the pre/post delta. If `wezterm` is not on `PATH`, `richhistory` also checks `RICHHISTORY_WEZTERM_CLI`, the sibling of `wezterm-gui`, and common macOS app bundle paths.
 
 Capture mode precedence is:
 
 - `ignore_command_patterns` or `ignore_cwd_patterns`: `skip`
-- `WEZTERM_PANE` is set: `full`
+- `WEZTERM_PANE` is set and a `wezterm` CLI is available: `full`
 - otherwise: `metadata`
 
 Outside WezTerm, events still record command text, cwd, exit status, duration, and session metadata, but output fields stay empty.
 
-Because WezTerm exposes pane text rather than stream-separated pipes, pane capture is stored in `stdout_text`. `stderr_text` remains empty for that capture path.
+Because WezTerm exposes pane text rather than stream-separated pipes, pane capture is treated as combined output. `richhistory` stores that combined pane delta in both `stdout_text` and `stderr_text` so either field remains searchable, while `show` notes that the streams were not actually separated.
 
 Config example:
 
@@ -114,7 +114,7 @@ Config example:
 ## Known Limitations
 
 - Output capture is intentionally unavailable outside WezTerm.
-- WezTerm capture reads pane text, so it cannot distinguish `stdout` from `stderr`.
+- WezTerm capture reads pane text, so it cannot truly distinguish `stdout` from `stderr`.
 - Pane snapshots depend on the available scrollback range and the `wezterm` CLI succeeding.
 
 ## Planned Improvements
@@ -126,7 +126,6 @@ Config example:
 
 [`contrib/`](./contrib/README.md) contains optional helpers built on top of the journal.
 
-- [`contrib/autosuggest`](./contrib/autosuggest/README.md): command suggestions backed by `codex exec`
 - [`contrib/atc`](./contrib/atc/README.md): an `@c` shell helper for short Codex questions
 
 AI integrations are examples, not part of the core CLI.
