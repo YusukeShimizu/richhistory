@@ -7,6 +7,7 @@
 - Output capture is only enabled inside WezTerm when a `wezterm` CLI can be resolved.
 - Storage is local NDJSON with rotation and pruning.
 - Optional helpers may build on top of the journal, but they are not part of the core CLI contract.
+- AI helpers under `contrib/` may tell external tools that `richhistory` is available, but they do not extend the core command set and may expose only manual shell helpers such as key bindings.
 
 ## Public Commands
 

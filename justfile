@@ -16,10 +16,12 @@ lint:
 
 shell_test:
 	zsh contrib/atc/test_atc.zsh
+	zsh contrib/suggest/test_suggest.zsh
 
 test:
 	go test ./...
 	zsh contrib/atc/test_atc.zsh
+	zsh contrib/suggest/test_suggest.zsh
 
 race:
 	go test -race ./...

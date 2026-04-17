@@ -127,5 +127,6 @@ Config example:
 [`contrib/`](./contrib/README.md) contains optional helpers built on top of the journal.
 
 - [`contrib/atc`](./contrib/atc/README.md): an `@c` shell helper for short Codex questions
+- [`contrib/suggest`](./contrib/suggest/README.md): a `Ctrl-g` ghost-text helper that asks Codex for a one-line command suggestion
 
 AI integrations are examples, not part of the core CLI.
